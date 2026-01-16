@@ -2,11 +2,8 @@ use std::env;
 
 use axum::{Router, routing::get};
 
-mod handlers;
-mod state;
-
-use crate::handlers::health::health_check;
-use crate::state::AppState;
+use axum_backend_series::handlers::health::health_check;
+use axum_backend_series::state::AppState;
 
 #[tokio::main]
 async fn main() {

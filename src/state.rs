@@ -1,12 +1,23 @@
+use std::sync::Arc;
+
 use axum::extract::FromRef;
 use sqlx::PgPool;
 
-use crate::repositories::user_repository::UserRepository;
+use crate::{
+    repositories::{
+        email_verification_repository::SqlxEmailVerificationRepository,
+        traits::{EmailVerificationRepository, UserRepository},
+        user_repository::SqlxUserRepository,
+    },
+    services::email_service::EmailService,
+};
 
 #[derive(Clone, FromRef)]
 pub struct AppState {
     pub db: PgPool,
-    pub user_repository: UserRepository,
+    pub user_repository: Arc<dyn UserRepository>,
+    pub email_verification_repository: Arc<dyn EmailVerificationRepository>,
+    pub email_service: Arc<EmailService>,
 }
 
 impl AppState {
@@ -15,10 +26,18 @@ impl AppState {
 
         sqlx::migrate!("./migrations").run(&db).await?;
 
-        let user_repository = UserRepository::new(db.clone());
+        let user_repository = Arc::new(SqlxUserRepository::new(db.clone()));
+
+        let email_verification_repository =
+            Arc::new(SqlxEmailVerificationRepository::new(db.clone()));
+
+        let email_service =
+            Arc::new(EmailService::new().expect("Failed to initialize email service"));
         Ok(Self {
             db,
             user_repository,
+            email_verification_repository,
+            email_service,
         })
     }
 }

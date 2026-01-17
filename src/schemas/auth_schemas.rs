@@ -48,6 +48,7 @@ pub struct UserData {
     pub username: String,
     pub bio: String,
     pub image: Option<String>,
+    pub email_verified: bool,
 }
 
 impl UserData {
@@ -57,7 +58,8 @@ impl UserData {
             token,
             username: user.username,
             bio: user.bio.unwrap_or_default(), // Empty string if None
-            image: user.image,                 // Keep as Option<String>
+            image: user.image,
+            email_verified: user.email_verified, // Keep as Option<String>
         }
     }
 }

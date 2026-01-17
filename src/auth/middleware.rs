@@ -90,9 +90,7 @@ where
 fn extract_token_from_headers(headers: &HeaderMap) -> Option<String> {
     let auth_header = headers.get("Authorization")?.to_str().ok()?;
 
-    if auth_header.starts_with("Token ") {
-        Some(auth_header[6..].to_string())
-    } else {
-        None
-    }
+    auth_header
+        .strip_prefix("Token ")
+        .map(|token| token.to_string())
 }

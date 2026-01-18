@@ -6,7 +6,8 @@ use sqlx::PgPool;
 use crate::{
     repositories::{
         email_verification_repository::SqlxEmailVerificationRepository,
-        traits::{EmailVerificationRepository, UserRepository},
+        password_reset_repository::SqlxPasswordResetRepository,
+        traits::{EmailVerificationRepository, PasswordResetRepository, UserRepository},
         user_repository::SqlxUserRepository,
     },
     services::email_service::EmailService,
@@ -17,6 +18,7 @@ pub struct AppState {
     pub db: PgPool,
     pub user_repository: Arc<dyn UserRepository>,
     pub email_verification_repository: Arc<dyn EmailVerificationRepository>,
+    pub password_reset_repository: Arc<dyn PasswordResetRepository>,
     pub email_service: Arc<EmailService>,
 }
 
@@ -31,12 +33,14 @@ impl AppState {
         let email_verification_repository =
             Arc::new(SqlxEmailVerificationRepository::new(db.clone()));
 
+        let password_reset_repository = Arc::new(SqlxPasswordResetRepository::new(db.clone()));
         let email_service =
             Arc::new(EmailService::new().expect("Failed to initialize email service"));
         Ok(Self {
             db,
             user_repository,
             email_verification_repository,
+            password_reset_repository,
             email_service,
         })
     }

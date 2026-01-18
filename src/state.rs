@@ -7,7 +7,11 @@ use crate::{
     repositories::{
         email_verification_repository::SqlxEmailVerificationRepository,
         password_reset_repository::SqlxPasswordResetRepository,
-        traits::{EmailVerificationRepository, PasswordResetRepository, UserRepository},
+        refresh_token_repository::SqlxRefreshTokenRepository,
+        traits::{
+            EmailVerificationRepository, PasswordResetRepository, RefreshTokenRepository,
+            UserRepository,
+        },
         user_repository::SqlxUserRepository,
     },
     services::email_service::EmailService,
@@ -19,6 +23,7 @@ pub struct AppState {
     pub user_repository: Arc<dyn UserRepository>,
     pub email_verification_repository: Arc<dyn EmailVerificationRepository>,
     pub password_reset_repository: Arc<dyn PasswordResetRepository>,
+    pub refresh_token_repository: Arc<dyn RefreshTokenRepository>,
     pub email_service: Arc<EmailService>,
 }
 
@@ -34,13 +39,18 @@ impl AppState {
             Arc::new(SqlxEmailVerificationRepository::new(db.clone()));
 
         let password_reset_repository = Arc::new(SqlxPasswordResetRepository::new(db.clone()));
+
+        let refresh_token_repository = Arc::new(SqlxRefreshTokenRepository::new(db.clone()));
+
         let email_service =
             Arc::new(EmailService::new().expect("Failed to initialize email service"));
+
         Ok(Self {
             db,
             user_repository,
             email_verification_repository,
             password_reset_repository,
+            refresh_token_repository,
             email_service,
         })
     }

@@ -7,13 +7,17 @@ use crate::{
         jwt::generate_token,
         middleware::RequireAuth,
         password::{hash_password, verify_password},
+        tokens::generate_refresh_token,
     },
     schemas::{
-        auth_schemas::{LoginUserRequest, RegisterUserRequest, UserData, UserResponse},
+        auth_schemas::{
+            LoginResponse, LoginUserRequest, RegisterUserRequest, UserData, UserResponse,
+        },
         password_reset_schemas::{
             ForgotPasswordRequest, ForgotPasswordResponse, ResetPasswordRequest,
             ResetPasswordResponse,
         },
+        token_schemas::{RefreshTokenRequest, RefreshTokenResponse},
     },
     state::AppState,
     utils::token_generator::generate_verification_token,
@@ -22,7 +26,7 @@ use crate::{
 pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserRequest>,
-) -> Result<Json<UserResponse>, StatusCode> {
+) -> Result<Json<LoginResponse>, StatusCode> {
     // Validate input data
     payload
         .user
@@ -65,6 +69,8 @@ pub async fn register(
     let verification_token = generate_verification_token();
     let expires_at = Utc::now() + Duration::hours(24);
 
+    eprintln!("Generated token: {}", verification_token);
+
     // Save token to database
     state
         .email_verification_repository
@@ -84,12 +90,25 @@ pub async fn register(
 
     // Generate JWT token
     let jwt_secret = std::env::var("JWT_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let token =
+    let access_token =
         generate_token(&user.id, &jwt_secret).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    // Generate refresh token
+    let refresh_token = generate_refresh_token();
+
+    // Save refresh token to database
+    state
+        .refresh_token_repository
+        .create_token(user.id, &refresh_token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     // Build response
-    let user_data = UserData::from_user_with_token(user, token);
-    let response = UserResponse { user: user_data };
+    let response = LoginResponse {
+        user: UserData::from_user(user),
+        access_token,
+        refresh_token,
+    };
 
     Ok(Json(response))
 }
@@ -97,7 +116,7 @@ pub async fn register(
 pub async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginUserRequest>,
-) -> Result<Json<UserResponse>, StatusCode> {
+) -> Result<Json<LoginResponse>, StatusCode> {
     // Validate input
     payload
         .user
@@ -122,12 +141,25 @@ pub async fn login(
 
     // Generate JWT token
     let jwt_secret = std::env::var("JWT_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let token =
+    let access_token =
         generate_token(&user.id, &jwt_secret).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    // Generate refresh token
+    let refresh_token = generate_refresh_token();
+
+    // Save refresh token to database
+    state
+        .refresh_token_repository
+        .create_token(user.id, &refresh_token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     // Build response
-    let user_data = UserData::from_user_with_token(user, token);
-    let response = UserResponse { user: user_data };
+    let response = LoginResponse {
+        user: UserData::from_user(user),
+        access_token,
+        refresh_token,
+    };
 
     Ok(Json(response))
 }
@@ -135,14 +167,10 @@ pub async fn login(
 pub async fn current_user(
     RequireAuth(user): RequireAuth,
 ) -> Result<Json<UserResponse>, StatusCode> {
-    // Generate fresh JWT token
-    let jwt_secret = std::env::var("JWT_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let token =
-        generate_token(&user.id, &jwt_secret).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
     // Build response
-    let user_data = UserData::from_user_with_token(user, token);
-    let response = UserResponse { user: user_data };
+    let response = UserResponse {
+        user: UserData::from_user(user),
+    };
 
     Ok(Json(response))
 }
@@ -294,4 +322,32 @@ pub async fn reset_password(
         message: "Password has been reset successfully. You can now login with your new password."
             .to_string(),
     }))
+}
+
+pub async fn refresh_token(
+    State(state): State<AppState>,
+    Json(payload): Json<RefreshTokenRequest>,
+) -> Result<Json<RefreshTokenResponse>, StatusCode> {
+    // Look up the refresh token in database
+    let refresh_token = state
+        .refresh_token_repository
+        .find_by_token(&payload.refresh_token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // Update last_used_at timestamp
+    state
+        .refresh_token_repository
+        .update_last_used(&payload.refresh_token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Generate new access token
+    let jwt_secret = std::env::var("JWT_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let access_token = generate_token(&refresh_token.user_id, &jwt_secret)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Return new access token
+    Ok(Json(RefreshTokenResponse { access_token }))
 }

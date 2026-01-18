@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::models::{
     User, email_verification_token::EmailVerificationToken,
-    password_reset_token::PasswordResetToken,
+    password_reset_token::PasswordResetToken, refresh_token::RefreshToken,
 };
 
 #[async_trait]
@@ -63,6 +63,19 @@ pub trait PasswordResetRepository: Send + Sync {
     ) -> Result<PasswordResetToken, SqlxError>;
 
     async fn find_by_token(&self, token: &str) -> Result<Option<PasswordResetToken>, SqlxError>;
+
+    async fn delete_token(&self, token: &str) -> Result<(), SqlxError>;
+
+    async fn delete_all_user_tokens(&self, user_id: Uuid) -> Result<(), SqlxError>;
+}
+
+#[async_trait]
+pub trait RefreshTokenRepository: Send + Sync {
+    async fn create_token(&self, user_id: Uuid, token: &str) -> Result<RefreshToken, SqlxError>;
+
+    async fn find_by_token(&self, token: &str) -> Result<Option<RefreshToken>, SqlxError>;
+
+    async fn update_last_used(&self, token: &str) -> Result<(), SqlxError>;
 
     async fn delete_token(&self, token: &str) -> Result<(), SqlxError>;
 

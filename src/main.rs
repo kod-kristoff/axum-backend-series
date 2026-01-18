@@ -4,7 +4,7 @@ use axum::routing::post;
 use axum::{Router, routing::get};
 
 use axum_backend_series::handlers::auth::{
-    current_user, forgot_password, login, register, reset_password, verify_email,
+    current_user, forgot_password, login, refresh_token, register, reset_password, verify_email,
 };
 use axum_backend_series::handlers::health::health_check;
 use axum_backend_series::state::AppState;
@@ -33,6 +33,7 @@ async fn main() {
         .route("/api/auth/verify-email", get(verify_email))
         .route("/api/auth/forgot-password", post(forgot_password))
         .route("/api/auth/reset-password", post(reset_password))
+        .route("/api/auth/refresh", post(refresh_token))
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
@@ -41,6 +42,10 @@ async fn main() {
     println!("  POST /api/users         - Register new user");
     println!("  POST /api/users/login   - Login existing user");
     println!("  GET  /api/user          - Get current user (requires auth)");
+    println!("  GET  /api/auth/verify-email      - Verify email with token");
+    println!("  POST /api/auth/forgot-password   - Request password reset");
+    println!("  POST /api/auth/reset-password    - Reset password with token");
+    println!("  POST /api/auth/refresh           - Get new access token");
     println!("  GET  /health            - Health check");
 
     axum::serve(listener, app).await.unwrap();

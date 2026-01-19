@@ -17,7 +17,7 @@ use crate::{
             ForgotPasswordRequest, ForgotPasswordResponse, ResetPasswordRequest,
             ResetPasswordResponse,
         },
-        token_schemas::{RefreshTokenRequest, RefreshTokenResponse},
+        token_schemas::{LogoutRequest, LogoutResponse, RefreshTokenRequest, RefreshTokenResponse},
     },
     state::AppState,
     utils::token_generator::generate_verification_token,
@@ -336,10 +336,70 @@ pub async fn refresh_token(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
+    // Check if token has expired
+    if refresh_token.is_expired() {
+        // Token is expired, delete it and reject
+        let _ = state
+            .refresh_token_repository
+            .delete_token(&payload.refresh_token)
+            .await;
+
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    // REUSE DETECTION - Check if token was already used
+    if refresh_token.is_used {
+        // SECURITY BREACH DETECTED!
+        // Someone is trying to use an old token
+        // This means the token was likely stolen
+
+        eprintln!("🚨 TOKEN REUSE DETECTED!");
+        eprintln!("Token: {}", &payload.refresh_token);
+        eprintln!("User ID: {}", refresh_token.user_id);
+        eprintln!("Originally used at: {:?}", refresh_token.used_at);
+
+        // Nuclear option: Delete ALL user's refresh tokens
+        // Force them to login again
+        state
+            .refresh_token_repository
+            .delete_all_user_tokens(refresh_token.user_id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        // Get user info for email
+        let user = state
+            .user_repository
+            .find_by_id(refresh_token.user_id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        // Send security alert email
+        if let Err(e) = state
+            .email_service
+            .send_security_alert(&user.email, &user.username)
+            .await
+        {
+            eprintln!("Failed to send security alert email: {}", e);
+            // Don't fail the request if email fails
+        }
+
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
     // Update last_used_at timestamp
     state
         .refresh_token_repository
-        .update_last_used(&payload.refresh_token)
+        .mark_token_as_used(&payload.refresh_token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Generate NEW refresh token with rotation
+    let new_refresh_token = generate_refresh_token();
+
+    state
+        .refresh_token_repository
+        .create_token(refresh_token.user_id, &new_refresh_token)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -349,5 +409,24 @@ pub async fn refresh_token(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Return new access token
-    Ok(Json(RefreshTokenResponse { access_token }))
+    Ok(Json(RefreshTokenResponse {
+        access_token,
+        refresh_token: new_refresh_token,
+    }))
+}
+
+pub async fn logout(
+    State(state): State<AppState>,
+    Json(payload): Json<LogoutRequest>,
+) -> Result<Json<LogoutResponse>, StatusCode> {
+    // Simply delete the refresh token from database
+    state
+        .refresh_token_repository
+        .delete_token(&payload.refresh_token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(LogoutResponse {
+        message: "Logged out successfully".to_string(),
+    }))
 }

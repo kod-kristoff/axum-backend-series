@@ -1,10 +1,13 @@
 use std::env;
 
+use async_trait::async_trait;
 use lettre::{
     Message, SmtpTransport, Transport,
     message::{Mailbox, header::ContentType},
     transport::smtp::authentication::Credentials,
 };
+
+use crate::domain::auth::ports::UserNotfier;
 
 pub struct EmailService {
     mailer: SmtpTransport,
@@ -39,13 +42,15 @@ impl EmailService {
 
         Ok(Self { mailer, from_email })
     }
-
-    pub async fn send_verification_email(
+}
+#[async_trait]
+impl UserNotfier for EmailService {
+    async fn send_verification_email(
         &self,
         to_email: &str,
         username: &str,
         verification_token: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), anyhow::Error> {
         let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
         let verification_link = format!(
             "{}/api/auth/verify-email?token={}",

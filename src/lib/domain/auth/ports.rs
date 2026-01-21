@@ -2,7 +2,30 @@ use async_trait::async_trait;
 use sqlx::Error as SqlxError;
 use uuid::Uuid;
 
-use crate::models::{User, email_verification_token::EmailVerificationToken};
+use crate::domain::auth::models::User;
+use crate::domain::auth::models::email_verification_token::EmailVerificationToken;
+use crate::domain::auth::models::user::{
+    FindUserError, LoginError, LoginUserRequest, RegisterUserError, RegisterUserRequest,
+    VerifyEmailError, VerifyEmailRequest,
+};
+
+#[async_trait]
+pub trait AuthService: Send + Sync + 'static {
+    async fn register_user(
+        &self,
+        req: &RegisterUserRequest,
+    ) -> Result<(User, String), RegisterUserError>;
+
+    async fn login(&self, req: &LoginUserRequest) -> Result<(User, String), LoginError>;
+
+    async fn verify_email(&self, req: &VerifyEmailRequest<'_>) -> Result<(), VerifyEmailError>;
+
+    async fn find_user_by_id(&self, user_id: Uuid) -> Result<Option<User>, FindUserError>;
+
+    async fn get_user_from_token(&self, token: &str) -> Result<Option<User>, LoginError>;
+
+    async fn generate_token_for_user(&self, user_id: &Uuid) -> Result<String, FindUserError>;
+}
 
 #[async_trait]
 pub trait UserRepository: Send + Sync {
@@ -42,4 +65,14 @@ pub trait EmailVerificationRepository: Send + Sync {
     async fn delete_token(&self, token: &str) -> Result<(), SqlxError>;
 
     async fn verify_user_email(&self, user_id: Uuid) -> Result<(), SqlxError>;
+}
+
+#[async_trait]
+pub trait UserNotfier: Send + Sync {
+    async fn send_verification_email(
+        &self,
+        to_email: &str,
+        username: &str,
+        verification_token: &str,
+    ) -> Result<(), anyhow::Error>;
 }

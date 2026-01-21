@@ -1,11 +1,13 @@
 use std::env;
+use std::sync::Arc;
 
-use axum::routing::post;
-use axum::{Router, routing::get};
-
-use axum_backend_series::handlers::auth::{current_user, login, register, verify_email};
-use axum_backend_series::handlers::health::health_check;
-use axum_backend_series::state::AppState;
+use axum_backend_series::domain::auth::service::Service;
+use axum_backend_series::inbound::http::HttpServer;
+use axum_backend_series::outbound::create_db;
+use axum_backend_series::outbound::email_client::EmailService;
+use axum_backend_series::outbound::sqlx_email_verification_repository::SqlxEmailVerificationRepository;
+use axum_backend_series::outbound::sqlx_health_check::SqlxHealthCheck;
+use axum_backend_series::outbound::sqlx_user_repository::SqlxUserRepository;
 
 #[tokio::main]
 async fn main() {
@@ -15,29 +17,29 @@ async fn main() {
     let database_url =
         env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env file or environment");
 
-    let app_state = AppState::new(&database_url)
+    let db = create_db(&database_url)
         .await
         .expect("Failed to connect to database");
 
     println!("Connected to database successfully!");
 
-    let app = Router::new()
-        // Health check endpoint
-        .route("/health", get(health_check))
-        // Authentication endpoints
-        .route("/api/users", post(register))
-        .route("/api/users/login", post(login))
-        .route("/api/user", get(current_user))
-        .route("/api/auth/verify-email", get(verify_email))
-        .with_state(app_state);
+    let user_repository = Arc::new(SqlxUserRepository::new(db.clone()));
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    println!("Server is running on http://0.0.0.0:3000");
-    println!("Available endpoints:");
-    println!("  POST /api/users         - Register new user");
-    println!("  POST /api/users/login   - Login existing user");
-    println!("  GET  /api/user          - Get current user (requires auth)");
-    println!("  GET  /health            - Health check");
+    let email_verification_repository = Arc::new(SqlxEmailVerificationRepository::new(db.clone()));
 
-    axum::serve(listener, app).await.unwrap();
+    let user_notifier = Arc::new(EmailService::new().expect("Failed to initialize email service"));
+
+    let auth_service = Arc::new(Service::new(
+        user_repository,
+        email_verification_repository,
+        user_notifier,
+    ));
+
+    let health_service = Arc::new(SqlxHealthCheck::new(db.clone()));
+
+    let http_server = HttpServer::new(auth_service, health_service)
+        .await
+        .expect("Failed to create server");
+
+    http_server.run().await.expect("Failed to run");
 }

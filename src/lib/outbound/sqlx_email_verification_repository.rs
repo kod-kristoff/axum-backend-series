@@ -3,8 +3,8 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use super::traits::EmailVerificationRepository;
-use crate::models::email_verification_token::EmailVerificationToken;
+use crate::domain::auth::models::email_verification_token::EmailVerificationToken;
+use crate::domain::auth::ports::EmailVerificationRepository;
 
 #[derive(Clone)]
 pub struct SqlxEmailVerificationRepository {

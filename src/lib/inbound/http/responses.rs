@@ -1,0 +1,129 @@
+use axum::{http::StatusCode, response::IntoResponse};
+use serde::Serialize;
+
+use crate::domain::auth::models::user::{
+    FindUserError, LoginError, RegisterUserError, VerifyEmailError,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApiError {
+    BadRequest(String),
+    Conflict(String),
+    Gone,
+    InternalServerError(String),
+    NotFound,
+    Unauthorized,
+    UnprocessableEntity(String),
+}
+
+impl From<RegisterUserError> for ApiError {
+    fn from(err: RegisterUserError) -> Self {
+        match err {
+            RegisterUserError::DuplicateEmail { email } => {
+                Self::Conflict(format!("user with email {} already exists", email))
+            }
+            RegisterUserError::DuplicateUsername { username } => {
+                Self::Conflict(format!("user with username {} already exists", username))
+            }
+            RegisterUserError::Unknown(cause) => {
+                eprintln!("{:?}", cause);
+                Self::InternalServerError("Internal server error".to_string())
+            }
+        }
+    }
+}
+
+impl From<LoginError> for ApiError {
+    fn from(err: LoginError) -> Self {
+        match err {
+            LoginError::Unauthorized => Self::Unauthorized,
+            LoginError::Unknown(cause) => {
+                eprintln!("{:?}", cause);
+                Self::InternalServerError("Internal Server Error".to_string())
+            }
+        }
+    }
+}
+
+impl From<FindUserError> for ApiError {
+    fn from(err: FindUserError) -> Self {
+        match err {
+            FindUserError::Unknown(cause) => {
+                eprintln!("{:?}", cause);
+                Self::InternalServerError("Internal Server Error".to_string())
+            }
+        }
+    }
+}
+
+impl From<VerifyEmailError> for ApiError {
+    fn from(err: VerifyEmailError) -> Self {
+        match err {
+            VerifyEmailError::IsExpired => Self::Gone,
+            VerifyEmailError::NotFound => Self::NotFound,
+            VerifyEmailError::Unknown(cause) => {
+                eprintln!("{:?}", cause);
+                Self::InternalServerError("Internal Server Error".to_string())
+            }
+        }
+    }
+}
+
+impl From<validator::ValidationError> for ApiError {
+    fn from(err: validator::ValidationError) -> Self {
+        Self::BadRequest(err.to_string())
+    }
+}
+
+impl From<validator::ValidationErrors> for ApiError {
+    fn from(err: validator::ValidationErrors) -> Self {
+        Self::BadRequest(err.to_string())
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> axum::response::Response {
+        use ApiError::*;
+
+        match self {
+            BadRequest(_) => StatusCode::BAD_REQUEST.into_response(),
+            Conflict(_) => StatusCode::CONFLICT.into_response(),
+            Gone => StatusCode::GONE.into_response(),
+            InternalServerError(e) => {
+                eprintln!("{}", e);
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+            NotFound => StatusCode::NOT_FOUND.into_response(),
+            Unauthorized => StatusCode::UNAUTHORIZED.into_response(),
+            UnprocessableEntity(_) => StatusCode::UNPROCESSABLE_ENTITY.into_response(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserResponse {
+    pub user: UserData,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserData {
+    pub email: String,
+    pub token: String,
+    pub username: String,
+    pub bio: String,
+    pub image: Option<String>,
+    pub email_verified: bool,
+}
+
+impl UserData {
+    pub fn from_user_with_token(user: crate::domain::auth::models::User, token: String) -> Self {
+        Self {
+            email: user.email,
+            token,
+            username: user.username,
+            bio: user.bio.unwrap_or_default(), // Empty string if None
+            image: user.image,
+            email_verified: user.email_verified, // Keep as Option<String>
+        }
+    }
+}

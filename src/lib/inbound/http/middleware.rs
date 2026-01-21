@@ -1,9 +1,12 @@
-use crate::{auth::jwt::validate_token, models::User, state::AppState};
 use axum::{
     extract::{FromRef, FromRequestParts},
-    http::{HeaderMap, StatusCode, request::Parts},
+    http::{HeaderMap, request::Parts},
 };
-use uuid::Uuid;
+
+use crate::{
+    domain::auth::models::{User, user::LoginError},
+    inbound::http::{AppState, responses::ApiError},
+};
 
 // For protected routes - requires valid JWT
 pub struct RequireAuth(pub User);
@@ -16,30 +19,21 @@ where
     AppState: FromRef<S>,
     S: Send + Sync,
 {
-    type Rejection = StatusCode;
+    type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let app_state = AppState::from_ref(state);
 
         // Extract Authorization header
         let headers = &parts.headers;
-        let token = extract_token_from_headers(headers).ok_or(StatusCode::UNAUTHORIZED)?;
-
-        // Validate JWT token
-        let jwt_secret =
-            std::env::var("JWT_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        let claims = validate_token(&token, &jwt_secret).map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-        // Get user from database
-        let user_id = Uuid::parse_str(&claims.sub).map_err(|_| StatusCode::UNAUTHORIZED)?;
+        let token = extract_token_from_headers(headers).ok_or(ApiError::Unauthorized)?;
 
         let user = app_state
-            .user_repository
-            .find_by_id(user_id)
+            .auth_service
+            .get_user_from_token(&token)
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            .ok_or(StatusCode::UNAUTHORIZED)?;
+            .map_err(ApiError::from)?
+            .ok_or(ApiError::Unauthorized)?;
 
         Ok(RequireAuth(user))
     }
@@ -50,7 +44,7 @@ where
     AppState: FromRef<S>,
     S: Send + Sync,
 {
-    type Rejection = StatusCode;
+    type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let app_state = AppState::from_ref(state);
@@ -62,28 +56,11 @@ where
             None => return Ok(OptionalAuth(None)),
         };
 
-        // Try to validate JWT token
-        let jwt_secret =
-            std::env::var("JWT_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        let claims = match validate_token(&token, &jwt_secret) {
-            Ok(claims) => claims,
-            Err(_) => return Ok(OptionalAuth(None)),
-        };
-
-        // Try to get user from database
-        let user_id = match Uuid::parse_str(&claims.sub) {
-            Ok(id) => id,
-            Err(_) => return Ok(OptionalAuth(None)),
-        };
-
-        let user = app_state
-            .user_repository
-            .find_by_id(user_id)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        Ok(OptionalAuth(user))
+        match app_state.auth_service.get_user_from_token(&token).await {
+            Ok(user) => Ok(OptionalAuth(user)),
+            Err(LoginError::Unauthorized) => Ok(OptionalAuth(None)),
+            Err(err) => Err(ApiError::from(err)),
+        }
     }
 }
 

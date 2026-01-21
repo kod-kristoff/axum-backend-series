@@ -1,4 +1,5 @@
-use crate::{models::User, repositories::traits::UserRepository};
+use crate::domain::auth::models::User;
+use crate::domain::auth::ports::UserRepository;
 use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;

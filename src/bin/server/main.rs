@@ -8,6 +8,7 @@ use axum_backend_series::outbound::email_client::EmailService;
 use axum_backend_series::outbound::sqlx_email_verification_repository::SqlxEmailVerificationRepository;
 use axum_backend_series::outbound::sqlx_health_check::SqlxHealthCheck;
 use axum_backend_series::outbound::sqlx_password_reset_repository::SqlxPasswordResetRepository;
+use axum_backend_series::outbound::sqlx_refresh_token_repository::SqlxRefreshTokenRepository;
 use axum_backend_series::outbound::sqlx_user_repository::SqlxUserRepository;
 
 #[tokio::main]
@@ -30,12 +31,15 @@ async fn main() {
 
     let password_reset_repository = Arc::new(SqlxPasswordResetRepository::new(db.clone()));
 
+    let refresh_token_repository = Arc::new(SqlxRefreshTokenRepository::new(db.clone()));
+
     let user_notifier = Arc::new(EmailService::new().expect("Failed to initialize email service"));
 
     let auth_service = Arc::new(Service::new(
         user_repository,
         email_verification_repository,
         password_reset_repository,
+        refresh_token_repository,
         user_notifier,
     ));
 

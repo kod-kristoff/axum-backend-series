@@ -10,7 +10,10 @@ use tokio::net;
 use crate::{
     domain::{auth::ports::AuthService, health::HealthService},
     inbound::http::handlers::{
-        auth::{current_user, forgot_password, login, register, reset_password, verify_email},
+        auth::{
+            current_user, forgot_password, login, refresh_token, register, reset_password,
+            verify_email,
+        },
         health::health_check,
     },
 };
@@ -58,9 +61,10 @@ impl HttpServer {
         println!("  POST /api/users                 - Register new user");
         println!("  POST /api/users/login           - Login existing user");
         println!("  GET  /api/user                  - Get current user (requires auth)");
-        println!("  GET  /api/auth/verify-email     - Verify email");
-        println!("  POST /api/auth/forgot-password  - Forgot password");
-        println!("  POST /api/auth/reset-password   - Reset password");
+        println!("  GET  /api/auth/verify-email     - Verify email with token");
+        println!("  POST /api/auth/forgot-password  - Request password reset");
+        println!("  POST /api/auth/reset-password   - Reset password with token");
+        println!("  POST /api/auth/refresh          - Get new access token");
         println!("  GET  /health                    - Health check");
 
         axum::serve(self.listener, self.router).await?;
@@ -76,4 +80,5 @@ fn api_routes() -> Router<AppState> {
         .route("/auth/verify-email", get(verify_email))
         .route("/auth/forgot-password", post(forgot_password))
         .route("/auth/reset-password", post(reset_password))
+        .route("/auth/refresh", post(refresh_token))
 }

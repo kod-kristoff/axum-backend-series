@@ -4,13 +4,15 @@ use validator::Validate;
 use crate::{
     domain::auth::models::{
         password_reset_tokens::{ForgotPasswordRequest, ResetPasswordRequest},
+        refresh_token::RefreshTokenRequest,
         user::{LoginUserRequest, RegisterUserRequest, VerifyEmailRequest},
     },
     inbound::http::{
         AppState,
         middleware::RequireAuth,
         responses::{
-            ApiError, ForgotPasswordResponse, ResetPasswordResponse, UserData, UserResponse,
+            ApiError, ForgotPasswordResponse, LoginResponse, RefreshTokenResponse,
+            ResetPasswordResponse, UserData, UserResponse,
         },
     },
 };
@@ -18,18 +20,21 @@ use crate::{
 pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserRequest>,
-) -> Result<Json<UserResponse>, ApiError> {
+) -> Result<Json<LoginResponse>, ApiError> {
     // Validate input data
     payload.user.validate().map_err(ApiError::from)?;
 
-    let (user, token) = state
+    let (user, access_token, refresh_token) = state
         .auth_service
         .register_user(&payload)
         .await
         .map_err(ApiError::from)?;
     // Build response
-    let user_data = UserData::from_user_with_token(user, token);
-    let response = UserResponse { user: user_data };
+    let response = LoginResponse {
+        user: UserData::from_user(user),
+        access_token,
+        refresh_token,
+    };
 
     Ok(Json(response))
 }
@@ -37,34 +42,30 @@ pub async fn register(
 pub async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginUserRequest>,
-) -> Result<Json<UserResponse>, ApiError> {
+) -> Result<Json<LoginResponse>, ApiError> {
     // Validate input
     payload.user.validate().map_err(ApiError::from)?;
 
-    let (user, token) = state
+    let (user, access_token, refresh_token) = state
         .auth_service
         .login(&payload)
         .await
         .map_err(ApiError::from)?;
     // Build response
-    let user_data = UserData::from_user_with_token(user, token);
-    let response = UserResponse { user: user_data };
+    let response = LoginResponse {
+        user: UserData::from_user(user),
+        access_token,
+        refresh_token,
+    };
 
     Ok(Json(response))
 }
 
-pub async fn current_user(
-    RequireAuth(user): RequireAuth,
-    State(state): State<AppState>,
-) -> Result<Json<UserResponse>, ApiError> {
-    let token = state
-        .auth_service
-        .generate_token_for_user(&user.id)
-        .await
-        .map_err(ApiError::from)?;
+pub async fn current_user(RequireAuth(user): RequireAuth) -> Result<Json<UserResponse>, ApiError> {
     // Build response
-    let user_data = UserData::from_user_with_token(user, token);
-    let response = UserResponse { user: user_data };
+    let response = UserResponse {
+        user: UserData::from_user(user),
+    };
 
     Ok(Json(response))
 }
@@ -125,4 +126,16 @@ pub async fn reset_password(
         message: "Password has been reset successfully. You can now login with your new password."
             .to_string(),
     }))
+}
+
+pub async fn refresh_token(
+    State(state): State<AppState>,
+    Json(payload): Json<RefreshTokenRequest>,
+) -> Result<Json<RefreshTokenResponse>, ApiError> {
+    state
+        .auth_service
+        .refresh_token(&payload)
+        .await
+        .map_err(ApiError::from)
+        .map(|access_token| Json(RefreshTokenResponse { access_token }))
 }

@@ -8,6 +8,9 @@ use crate::domain::auth::models::password_reset_tokens::{
     ForgotPasswordError, ForgotPasswordRequest, PasswordResetToken, ResetPasswordError,
     ResetPasswordRequest,
 };
+use crate::domain::auth::models::refresh_token::{
+    RefreshToken, RefreshTokenError, RefreshTokenRequest,
+};
 use crate::domain::auth::models::user::{
     FindUserError, LoginError, LoginUserRequest, RegisterUserError, RegisterUserRequest,
     VerifyEmailError, VerifyEmailRequest,
@@ -18,9 +21,9 @@ pub trait AuthService: Send + Sync + 'static {
     async fn register_user(
         &self,
         req: &RegisterUserRequest,
-    ) -> Result<(User, String), RegisterUserError>;
+    ) -> Result<(User, String, String), RegisterUserError>;
 
-    async fn login(&self, req: &LoginUserRequest) -> Result<(User, String), LoginError>;
+    async fn login(&self, req: &LoginUserRequest) -> Result<(User, String, String), LoginError>;
 
     async fn verify_email(&self, req: &VerifyEmailRequest<'_>) -> Result<(), VerifyEmailError>;
 
@@ -29,6 +32,8 @@ pub trait AuthService: Send + Sync + 'static {
     async fn get_user_from_token(&self, token: &str) -> Result<Option<User>, LoginError>;
 
     async fn generate_token_for_user(&self, user_id: &Uuid) -> Result<String, FindUserError>;
+
+    async fn refresh_token(&self, req: &RefreshTokenRequest) -> Result<String, RefreshTokenError>;
 
     async fn forgot_password(&self, req: &ForgotPasswordRequest)
     -> Result<(), ForgotPasswordError>;
@@ -108,6 +113,19 @@ pub trait PasswordResetRepository: Send + Sync {
     ) -> Result<PasswordResetToken, SqlxError>;
 
     async fn find_by_token(&self, token: &str) -> Result<Option<PasswordResetToken>, SqlxError>;
+
+    async fn delete_token(&self, token: &str) -> Result<(), SqlxError>;
+
+    async fn delete_all_user_tokens(&self, user_id: Uuid) -> Result<(), SqlxError>;
+}
+
+#[async_trait]
+pub trait RefreshTokenRepository: Send + Sync {
+    async fn create_token(&self, user_id: Uuid, token: &str) -> Result<RefreshToken, SqlxError>;
+
+    async fn find_by_token(&self, token: &str) -> Result<Option<RefreshToken>, SqlxError>;
+
+    async fn update_last_used(&self, token: &str) -> Result<(), SqlxError>;
 
     async fn delete_token(&self, token: &str) -> Result<(), SqlxError>;
 

@@ -10,19 +10,20 @@ use crate::domain::auth::{
         password_reset_tokens::{
             ForgotPasswordError, ForgotPasswordRequest, ResetPasswordError, ResetPasswordRequest,
         },
+        refresh_token::{RefreshTokenError, RefreshTokenRequest},
         user::{
             FindUserError, LoginError, LoginUserRequest, RegisterUserError, RegisterUserRequest,
             VerifyEmailError, VerifyEmailRequest,
         },
     },
     ports::{
-        AuthService, EmailVerificationRepository, PasswordResetRepository, UserNotfier,
-        UserRepository,
+        AuthService, EmailVerificationRepository, PasswordResetRepository, RefreshTokenRepository,
+        UserNotfier, UserRepository,
     },
     shared::{
         jwt::{generate_token, validate_token},
         password::{hash_password, verify_password},
-        token_generator::generate_verification_token,
+        token_generator::{generate_refresh_token, generate_verification_token},
     },
 };
 
@@ -30,6 +31,7 @@ pub struct Service {
     user_repository: Arc<dyn UserRepository>,
     email_verification_repository: Arc<dyn EmailVerificationRepository>,
     password_reset_repository: Arc<dyn PasswordResetRepository>,
+    refresh_token_repository: Arc<dyn RefreshTokenRepository>,
     user_notifier: Arc<dyn UserNotfier>,
 }
 
@@ -38,12 +40,14 @@ impl Service {
         user_repository: Arc<dyn UserRepository>,
         email_verification_repository: Arc<dyn EmailVerificationRepository>,
         password_reset_repository: Arc<dyn PasswordResetRepository>,
+        refresh_token_repository: Arc<dyn RefreshTokenRepository>,
         user_notifier: Arc<dyn UserNotfier>,
     ) -> Self {
         Self {
             user_repository,
             email_verification_repository,
             password_reset_repository,
+            refresh_token_repository,
             user_notifier,
         }
     }
@@ -54,7 +58,7 @@ impl AuthService for Service {
     async fn register_user(
         &self,
         req: &RegisterUserRequest,
-    ) -> Result<(User, String), RegisterUserError> {
+    ) -> Result<(User, String, String), RegisterUserError> {
         // Check if user already exists
         if self
             .user_repository
@@ -112,11 +116,21 @@ impl AuthService for Service {
 
         // Generate JWT token
         let jwt_secret = std::env::var("JWT_SECRET").map_err(Into::<anyhow::Error>::into)?;
-        let token = generate_token(&user.id, &jwt_secret).map_err(Into::<anyhow::Error>::into)?;
-        Ok((user, token))
+        let access_token =
+            generate_token(&user.id, &jwt_secret).map_err(Into::<anyhow::Error>::into)?;
+
+        // Generate refresh token
+        let refresh_token = generate_refresh_token();
+
+        // Save refresh token
+        self.refresh_token_repository
+            .create_token(user.id, &refresh_token)
+            .await
+            .map_err(|err| RegisterUserError::Unknown(err.into()))?;
+        Ok((user, access_token, refresh_token))
     }
 
-    async fn login(&self, req: &LoginUserRequest) -> Result<(User, String), LoginError> {
+    async fn login(&self, req: &LoginUserRequest) -> Result<(User, String, String), LoginError> {
         // Find user by email
         let user = self
             .user_repository
@@ -136,9 +150,18 @@ impl AuthService for Service {
         // Generate JWT token
         let jwt_secret =
             std::env::var("JWT_SECRET").map_err(|err| LoginError::Unknown(err.into()))?;
-        let token =
+        let access_token =
             generate_token(&user.id, &jwt_secret).map_err(|err| LoginError::Unknown(err.into()))?;
-        Ok((user, token))
+
+        // Generate refresh token
+        let refresh_token = generate_refresh_token();
+
+        // Save refresh token
+        self.refresh_token_repository
+            .create_token(user.id, &refresh_token)
+            .await
+            .map_err(|err| LoginError::Unknown(err.into()))?;
+        Ok((user, access_token, refresh_token))
     }
 
     async fn verify_email(&self, req: &VerifyEmailRequest<'_>) -> Result<(), VerifyEmailError> {
@@ -207,6 +230,30 @@ impl AuthService for Service {
         let token = generate_token(user_id, &jwt_secret)
             .map_err(|err| FindUserError::Unknown(err.into()))?;
         Ok(token)
+    }
+
+    async fn refresh_token(&self, req: &RefreshTokenRequest) -> Result<String, RefreshTokenError> {
+        // Look up the refresh token in database
+        let refresh_token = self
+            .refresh_token_repository
+            .find_by_token(&req.refresh_token)
+            .await
+            .map_err(|err| RefreshTokenError::Unknown(err.into()))?
+            .ok_or(RefreshTokenError::Unauthorized)?;
+
+        // Update last_used_at timestamp
+        self.refresh_token_repository
+            .update_last_used(&req.refresh_token)
+            .await
+            .map_err(|err| RefreshTokenError::Unknown(err.into()))?;
+
+        // Generate new access token
+        let jwt_secret =
+            std::env::var("JWT_SECRET").map_err(|err| RefreshTokenError::Unknown(err.into()))?;
+        let access_token = generate_token(&refresh_token.user_id, &jwt_secret)
+            .map_err(|err| RefreshTokenError::Unknown(err.into()))?;
+
+        Ok(access_token)
     }
 
     async fn forgot_password(

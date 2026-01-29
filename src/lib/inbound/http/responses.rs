@@ -3,6 +3,7 @@ use serde::Serialize;
 
 use crate::domain::auth::models::{
     password_reset_tokens::{ForgotPasswordError, ResetPasswordError},
+    refresh_token::RefreshTokenError,
     user::{FindUserError, LoginError, RegisterUserError, VerifyEmailError},
 };
 
@@ -94,6 +95,18 @@ impl From<ResetPasswordError> for ApiError {
     }
 }
 
+impl From<RefreshTokenError> for ApiError {
+    fn from(err: RefreshTokenError) -> Self {
+        match err {
+            RefreshTokenError::Unauthorized => Self::Unauthorized,
+            RefreshTokenError::Unknown(cause) => {
+                eprintln!("{:?}", cause);
+                Self::InternalServerError("Internal Server Error".to_string())
+            }
+        }
+    }
+}
+
 impl From<validator::ValidationError> for ApiError {
     fn from(err: validator::ValidationError) -> Self {
         Self::BadRequest(err.to_string())
@@ -126,6 +139,13 @@ impl IntoResponse for ApiError {
 }
 
 #[derive(Debug, Serialize)]
+pub struct LoginResponse {
+    pub user: UserData,
+    pub access_token: String,  // New: separate access token
+    pub refresh_token: String, // New: refresh token
+}
+
+#[derive(Debug, Serialize)]
 pub struct UserResponse {
     pub user: UserData,
 }
@@ -133,7 +153,6 @@ pub struct UserResponse {
 #[derive(Debug, Serialize)]
 pub struct UserData {
     pub email: String,
-    pub token: String,
     pub username: String,
     pub bio: String,
     pub image: Option<String>,
@@ -141,10 +160,9 @@ pub struct UserData {
 }
 
 impl UserData {
-    pub fn from_user_with_token(user: crate::domain::auth::models::User, token: String) -> Self {
+    pub fn from_user(user: crate::domain::auth::models::User) -> Self {
         Self {
             email: user.email,
-            token,
             username: user.username,
             bio: user.bio.unwrap_or_default(), // Empty string if None
             image: user.image,
@@ -160,5 +178,15 @@ pub struct ForgotPasswordResponse {
 
 #[derive(Debug, Serialize)]
 pub struct ResetPasswordResponse {
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RefreshTokenResponse {
+    pub access_token: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LogoutResponse {
     pub message: String,
 }

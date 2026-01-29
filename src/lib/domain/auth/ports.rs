@@ -4,6 +4,10 @@ use uuid::Uuid;
 
 use crate::domain::auth::models::User;
 use crate::domain::auth::models::email_verification_token::EmailVerificationToken;
+use crate::domain::auth::models::password_reset_tokens::{
+    ForgotPasswordError, ForgotPasswordRequest, PasswordResetToken, ResetPasswordError,
+    ResetPasswordRequest,
+};
 use crate::domain::auth::models::user::{
     FindUserError, LoginError, LoginUserRequest, RegisterUserError, RegisterUserRequest,
     VerifyEmailError, VerifyEmailRequest,
@@ -25,6 +29,10 @@ pub trait AuthService: Send + Sync + 'static {
     async fn get_user_from_token(&self, token: &str) -> Result<Option<User>, LoginError>;
 
     async fn generate_token_for_user(&self, user_id: &Uuid) -> Result<String, FindUserError>;
+
+    async fn forgot_password(&self, req: &ForgotPasswordRequest)
+    -> Result<(), ForgotPasswordError>;
+    async fn reset_password(&self, req: &ResetPasswordRequest) -> Result<(), ResetPasswordError>;
 }
 
 #[async_trait]
@@ -48,6 +56,12 @@ pub trait UserRepository: Send + Sync {
         bio: Option<&str>,
         image: Option<&str>,
     ) -> Result<Option<User>, SqlxError>;
+
+    async fn update_password(
+        &self,
+        user_id: Uuid,
+        new_password_hash: &str,
+    ) -> Result<(), SqlxError>;
 }
 
 #[async_trait]
@@ -75,4 +89,27 @@ pub trait UserNotfier: Send + Sync {
         username: &str,
         verification_token: &str,
     ) -> Result<(), anyhow::Error>;
+
+    async fn send_password_reset_email(
+        &self,
+        to_email: &str,
+        username: &str,
+        reset_token: &str,
+    ) -> Result<(), anyhow::Error>;
+}
+
+#[async_trait]
+pub trait PasswordResetRepository: Send + Sync {
+    async fn create_token(
+        &self,
+        user_id: Uuid,
+        token: &str,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<PasswordResetToken, SqlxError>;
+
+    async fn find_by_token(&self, token: &str) -> Result<Option<PasswordResetToken>, SqlxError>;
+
+    async fn delete_token(&self, token: &str) -> Result<(), SqlxError>;
+
+    async fn delete_all_user_tokens(&self, user_id: Uuid) -> Result<(), SqlxError>;
 }

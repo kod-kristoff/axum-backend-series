@@ -1,8 +1,9 @@
 use axum::{http::StatusCode, response::IntoResponse};
 use serde::Serialize;
 
-use crate::domain::auth::models::user::{
-    FindUserError, LoginError, RegisterUserError, VerifyEmailError,
+use crate::domain::auth::models::{
+    password_reset_tokens::{ForgotPasswordError, ResetPasswordError},
+    user::{FindUserError, LoginError, RegisterUserError, VerifyEmailError},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +70,30 @@ impl From<VerifyEmailError> for ApiError {
     }
 }
 
+impl From<ForgotPasswordError> for ApiError {
+    fn from(err: ForgotPasswordError) -> Self {
+        match err {
+            ForgotPasswordError::Unknown(cause) => {
+                eprintln!("{:?}", cause);
+                Self::InternalServerError("Internal Server Error".to_string())
+            }
+        }
+    }
+}
+
+impl From<ResetPasswordError> for ApiError {
+    fn from(err: ResetPasswordError) -> Self {
+        match err {
+            ResetPasswordError::TokenIsExpired => Self::Gone,
+            ResetPasswordError::TokenNotFound => Self::NotFound,
+            ResetPasswordError::Unknown(cause) => {
+                eprintln!("{:?}", cause);
+                Self::InternalServerError("Internal Server Error".to_string())
+            }
+        }
+    }
+}
+
 impl From<validator::ValidationError> for ApiError {
     fn from(err: validator::ValidationError) -> Self {
         Self::BadRequest(err.to_string())
@@ -126,4 +151,14 @@ impl UserData {
             email_verified: user.email_verified, // Keep as Option<String>
         }
     }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ForgotPasswordResponse {
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ResetPasswordResponse {
+    pub message: String,
 }

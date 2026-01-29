@@ -1,13 +1,17 @@
-use axum::{Json, extract::State, http::StatusCode};
-use chrono::{Duration, Utc};
+use axum::{Json, extract::State};
 use validator::Validate;
 
 use crate::{
-    domain::auth::models::user::{LoginUserRequest, RegisterUserRequest, VerifyEmailRequest},
+    domain::auth::models::{
+        password_reset_tokens::{ForgotPasswordRequest, ResetPasswordRequest},
+        user::{LoginUserRequest, RegisterUserRequest, VerifyEmailRequest},
+    },
     inbound::http::{
         AppState,
         middleware::RequireAuth,
-        responses::{ApiError, UserData, UserResponse},
+        responses::{
+            ApiError, ForgotPasswordResponse, ResetPasswordResponse, UserData, UserResponse,
+        },
     },
 };
 
@@ -83,4 +87,42 @@ pub async fn verify_email(
     Ok(Json(serde_json::json!({
         "message": "Email verified successfully!"
     })))
+}
+
+// Handler for "Forgot Password" - generates and emails reset token
+pub async fn forgot_password(
+    State(state): State<AppState>,
+    Json(payload): Json<ForgotPasswordRequest>,
+) -> Result<Json<ForgotPasswordResponse>, ApiError> {
+    // Validate email format
+    payload.validate().map_err(ApiError::from)?;
+
+    state
+        .auth_service
+        .forgot_password(&payload)
+        .await
+        .map_err(ApiError::from)?;
+
+    Ok(Json(ForgotPasswordResponse {
+        message: "If that email exists, a password reset link has been sent.".to_string(),
+    }))
+}
+// Handler for actually resetting the password
+pub async fn reset_password(
+    State(state): State<AppState>,
+    Json(payload): Json<ResetPasswordRequest>,
+) -> Result<Json<ResetPasswordResponse>, ApiError> {
+    // Validate new password
+    payload.validate()?;
+
+    state
+        .auth_service
+        .reset_password(&payload)
+        .await
+        .map_err(ApiError::from)?;
+
+    Ok(Json(ResetPasswordResponse {
+        message: "Password has been reset successfully. You can now login with your new password."
+            .to_string(),
+    }))
 }

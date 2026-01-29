@@ -7,12 +7,18 @@ use uuid::Uuid;
 use crate::domain::auth::{
     models::{
         User,
+        password_reset_tokens::{
+            ForgotPasswordError, ForgotPasswordRequest, ResetPasswordError, ResetPasswordRequest,
+        },
         user::{
             FindUserError, LoginError, LoginUserRequest, RegisterUserError, RegisterUserRequest,
             VerifyEmailError, VerifyEmailRequest,
         },
     },
-    ports::{AuthService, EmailVerificationRepository, UserNotfier, UserRepository},
+    ports::{
+        AuthService, EmailVerificationRepository, PasswordResetRepository, UserNotfier,
+        UserRepository,
+    },
     shared::{
         jwt::{generate_token, validate_token},
         password::{hash_password, verify_password},
@@ -23,6 +29,7 @@ use crate::domain::auth::{
 pub struct Service {
     user_repository: Arc<dyn UserRepository>,
     email_verification_repository: Arc<dyn EmailVerificationRepository>,
+    password_reset_repository: Arc<dyn PasswordResetRepository>,
     user_notifier: Arc<dyn UserNotfier>,
 }
 
@@ -30,11 +37,13 @@ impl Service {
     pub fn new(
         user_repository: Arc<dyn UserRepository>,
         email_verification_repository: Arc<dyn EmailVerificationRepository>,
+        password_reset_repository: Arc<dyn PasswordResetRepository>,
         user_notifier: Arc<dyn UserNotfier>,
     ) -> Self {
         Self {
             user_repository,
             email_verification_repository,
+            password_reset_repository,
             user_notifier,
         }
     }
@@ -198,5 +207,92 @@ impl AuthService for Service {
         let token = generate_token(user_id, &jwt_secret)
             .map_err(|err| FindUserError::Unknown(err.into()))?;
         Ok(token)
+    }
+
+    async fn forgot_password(
+        &self,
+        req: &ForgotPasswordRequest,
+    ) -> Result<(), ForgotPasswordError> {
+        // Validate email format
+        // req.validate().map_err(|_| ResetPasswordError::BAD_REQUEST)?;
+
+        // Look up user by email
+        let user = self
+            .user_repository
+            .find_by_email(&req.email)
+            .await
+            .map_err(|err| ForgotPasswordError::Unknown(err.into()))?;
+
+        // SECURITY: Always return success even if email doesn't exist
+        // This prevents attackers from discovering which emails are registered
+        if user.is_none() {
+            return Ok(());
+        }
+
+        let user = user.unwrap();
+
+        // Generate reset token
+        let reset_token = generate_verification_token();
+        let expires_at = Utc::now() + Duration::hours(1); // 1 hour expiration
+
+        // Save token to database
+        self.password_reset_repository
+            .create_token(user.id, &reset_token, expires_at)
+            .await
+            .map_err(|err| ForgotPasswordError::Unknown(err.into()))?;
+
+        // Send reset email
+        self.user_notifier
+            .send_password_reset_email(&user.email, &user.username, &reset_token)
+            .await
+            .map_err(|err| {
+                eprintln!("Failed to send password reset email: {}", err);
+                ForgotPasswordError::Unknown(err.into())
+            })?;
+
+        Ok(())
+    }
+
+    // Handler for actually resetting the password
+    async fn reset_password(&self, req: &ResetPasswordRequest) -> Result<(), ResetPasswordError> {
+        // Validate new password
+        // req.validate().map_err(|_| ResetPasswordError::BAD_REQUEST)?;
+
+        // Look up token
+        let reset_token = self
+            .password_reset_repository
+            .find_by_token(&req.token)
+            .await
+            .map_err(|err| ResetPasswordError::Unknown(err.into()))?
+            .ok_or(ResetPasswordError::TokenNotFound)?;
+
+        // Check expiration
+        if reset_token.is_expired() {
+            // Clean up expired token
+            self.password_reset_repository
+                .delete_token(&req.token)
+                .await
+                .map_err(|err| ResetPasswordError::Unknown(err.into()))?;
+
+            return Err(ResetPasswordError::TokenIsExpired);
+        }
+
+        // Hash new password
+        let new_password_hash = hash_password(&req.new_password)
+            .map_err(|err| ResetPasswordError::Unknown(err.into()))?;
+
+        // Update user password
+        self.user_repository
+            .update_password(reset_token.user_id, &new_password_hash)
+            .await
+            .map_err(|err| ResetPasswordError::Unknown(err.into()))?;
+
+        // Delete ALL reset tokens for this user (invalidate any other pending requests)
+        self.password_reset_repository
+            .delete_all_user_tokens(reset_token.user_id)
+            .await
+            .map_err(|err| ResetPasswordError::Unknown(err.into()))?;
+
+        Ok(())
     }
 }

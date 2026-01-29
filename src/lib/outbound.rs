@@ -3,6 +3,7 @@ use sqlx::PgPool;
 pub mod email_client;
 pub mod sqlx_email_verification_repository;
 pub mod sqlx_health_check;
+pub mod sqlx_password_reset_repository;
 pub mod sqlx_user_repository;
 
 pub async fn create_db(database_url: &str) -> Result<PgPool, sqlx::Error> {

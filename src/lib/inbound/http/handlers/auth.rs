@@ -4,14 +4,14 @@ use validator::Validate;
 use crate::{
     domain::auth::models::{
         password_reset_tokens::{ForgotPasswordRequest, ResetPasswordRequest},
-        refresh_token::RefreshTokenRequest,
+        refresh_token::{LogoutRequest, RefreshTokenRequest},
         user::{LoginUserRequest, RegisterUserRequest, VerifyEmailRequest},
     },
     inbound::http::{
         AppState,
         middleware::RequireAuth,
         responses::{
-            ApiError, ForgotPasswordResponse, LoginResponse, RefreshTokenResponse,
+            ApiError, ForgotPasswordResponse, LoginResponse, LogoutResponse, RefreshTokenResponse,
             ResetPasswordResponse, UserData, UserResponse,
         },
     },
@@ -132,10 +132,30 @@ pub async fn refresh_token(
     State(state): State<AppState>,
     Json(payload): Json<RefreshTokenRequest>,
 ) -> Result<Json<RefreshTokenResponse>, ApiError> {
-    state
+    let (access_token, refresh_token) = state
         .auth_service
         .refresh_token(&payload)
         .await
-        .map_err(ApiError::from)
-        .map(|access_token| Json(RefreshTokenResponse { access_token }))
+        .map_err(ApiError::from)?;
+
+    Ok(Json(RefreshTokenResponse {
+        access_token,
+        refresh_token,
+    }))
+}
+
+pub async fn logout(
+    State(state): State<AppState>,
+    Json(payload): Json<LogoutRequest>,
+) -> Result<Json<LogoutResponse>, ApiError> {
+    // Simply delete the refresh token from database
+    state
+        .auth_service
+        .logout(&payload)
+        .await
+        .map_err(ApiError::from)?;
+
+    Ok(Json(LogoutResponse {
+        message: "Logged out successfully".to_string(),
+    }))
 }

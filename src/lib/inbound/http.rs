@@ -11,7 +11,7 @@ use crate::{
     domain::{auth::ports::AuthService, health::HealthService},
     inbound::http::handlers::{
         auth::{
-            current_user, forgot_password, login, refresh_token, register, reset_password,
+            current_user, forgot_password, login, logout, refresh_token, register, reset_password,
             verify_email,
         },
         health::health_check,
@@ -65,6 +65,7 @@ impl HttpServer {
         println!("  POST /api/auth/forgot-password  - Request password reset");
         println!("  POST /api/auth/reset-password   - Reset password with token");
         println!("  POST /api/auth/refresh          - Get new access token");
+        println!("  POST /api/auth/logout           - Logout (delete refresh token)");
         println!("  GET  /health                    - Health check");
 
         axum::serve(self.listener, self.router).await?;
@@ -81,4 +82,5 @@ fn api_routes() -> Router<AppState> {
         .route("/auth/forgot-password", post(forgot_password))
         .route("/auth/reset-password", post(reset_password))
         .route("/auth/refresh", post(refresh_token))
+        .route("/auth/logout", post(logout))
 }

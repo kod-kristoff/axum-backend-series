@@ -9,11 +9,11 @@ use crate::domain::auth::models::password_reset_tokens::{
     ResetPasswordRequest,
 };
 use crate::domain::auth::models::refresh_token::{
-    RefreshToken, RefreshTokenError, RefreshTokenRequest,
+    LogoutRequest, RefreshToken, RefreshTokenError, RefreshTokenRequest,
 };
 use crate::domain::auth::models::user::{
-    FindUserError, LoginError, LoginUserRequest, RegisterUserError, RegisterUserRequest,
-    VerifyEmailError, VerifyEmailRequest,
+    FindUserError, LoginError, LoginUserRequest, LogoutError, RegisterUserError,
+    RegisterUserRequest, VerifyEmailError, VerifyEmailRequest,
 };
 
 #[async_trait]
@@ -25,6 +25,8 @@ pub trait AuthService: Send + Sync + 'static {
 
     async fn login(&self, req: &LoginUserRequest) -> Result<(User, String, String), LoginError>;
 
+    async fn logout(&self, req: &LogoutRequest) -> Result<(), LogoutError>;
+
     async fn verify_email(&self, req: &VerifyEmailRequest<'_>) -> Result<(), VerifyEmailError>;
 
     async fn find_user_by_id(&self, user_id: Uuid) -> Result<Option<User>, FindUserError>;
@@ -33,7 +35,10 @@ pub trait AuthService: Send + Sync + 'static {
 
     async fn generate_token_for_user(&self, user_id: &Uuid) -> Result<String, FindUserError>;
 
-    async fn refresh_token(&self, req: &RefreshTokenRequest) -> Result<String, RefreshTokenError>;
+    async fn refresh_token(
+        &self,
+        req: &RefreshTokenRequest,
+    ) -> Result<(String, String), RefreshTokenError>;
 
     async fn forgot_password(&self, req: &ForgotPasswordRequest)
     -> Result<(), ForgotPasswordError>;
@@ -101,6 +106,12 @@ pub trait UserNotfier: Send + Sync {
         username: &str,
         reset_token: &str,
     ) -> Result<(), anyhow::Error>;
+
+    async fn send_security_alert(
+        &self,
+        to_email: &str,
+        username: &str,
+    ) -> Result<(), anyhow::Error>;
 }
 
 #[async_trait]
@@ -130,4 +141,6 @@ pub trait RefreshTokenRepository: Send + Sync {
     async fn delete_token(&self, token: &str) -> Result<(), SqlxError>;
 
     async fn delete_all_user_tokens(&self, user_id: Uuid) -> Result<(), SqlxError>;
+
+    async fn mark_token_as_used(&self, token: &str) -> Result<(), SqlxError>;
 }

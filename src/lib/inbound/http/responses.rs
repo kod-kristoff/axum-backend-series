@@ -4,7 +4,7 @@ use serde::Serialize;
 use crate::domain::auth::models::{
     password_reset_tokens::{ForgotPasswordError, ResetPasswordError},
     refresh_token::RefreshTokenError,
-    user::{FindUserError, LoginError, RegisterUserError, VerifyEmailError},
+    user::{FindUserError, LoginError, LogoutError, RegisterUserError, VerifyEmailError},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +107,17 @@ impl From<RefreshTokenError> for ApiError {
     }
 }
 
+impl From<LogoutError> for ApiError {
+    fn from(err: LogoutError) -> Self {
+        match err {
+            LogoutError::Unknown(cause) => {
+                eprintln!("{:?}", cause);
+                Self::InternalServerError("Internal Server Error".to_string())
+            }
+        }
+    }
+}
+
 impl From<validator::ValidationError> for ApiError {
     fn from(err: validator::ValidationError) -> Self {
         Self::BadRequest(err.to_string())
@@ -184,6 +195,7 @@ pub struct ResetPasswordResponse {
 #[derive(Debug, Serialize)]
 pub struct RefreshTokenResponse {
     pub access_token: String,
+    pub refresh_token: String,
 }
 
 #[derive(Debug, Serialize)]

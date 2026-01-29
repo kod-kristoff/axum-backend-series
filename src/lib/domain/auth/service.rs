@@ -10,10 +10,10 @@ use crate::domain::auth::{
         password_reset_tokens::{
             ForgotPasswordError, ForgotPasswordRequest, ResetPasswordError, ResetPasswordRequest,
         },
-        refresh_token::{RefreshTokenError, RefreshTokenRequest},
+        refresh_token::{LogoutRequest, RefreshTokenError, RefreshTokenRequest},
         user::{
-            FindUserError, LoginError, LoginUserRequest, RegisterUserError, RegisterUserRequest,
-            VerifyEmailError, VerifyEmailRequest,
+            FindUserError, LoginError, LoginUserRequest, LogoutError, RegisterUserError,
+            RegisterUserRequest, VerifyEmailError, VerifyEmailRequest,
         },
     },
     ports::{
@@ -164,6 +164,14 @@ impl AuthService for Service {
         Ok((user, access_token, refresh_token))
     }
 
+    async fn logout(&self, req: &LogoutRequest) -> Result<(), LogoutError> {
+        self.refresh_token_repository
+            .delete_token(&req.refresh_token)
+            .await
+            .map_err(|err| LogoutError::Unknown(err.into()))?;
+        Ok(())
+    }
+
     async fn verify_email(&self, req: &VerifyEmailRequest<'_>) -> Result<(), VerifyEmailError> {
         // Look up the token in database
         let verification_token = self
@@ -232,7 +240,10 @@ impl AuthService for Service {
         Ok(token)
     }
 
-    async fn refresh_token(&self, req: &RefreshTokenRequest) -> Result<String, RefreshTokenError> {
+    async fn refresh_token(
+        &self,
+        req: &RefreshTokenRequest,
+    ) -> Result<(String, String), RefreshTokenError> {
         // Look up the refresh token in database
         let refresh_token = self
             .refresh_token_repository
@@ -241,9 +252,72 @@ impl AuthService for Service {
             .map_err(|err| RefreshTokenError::Unknown(err.into()))?
             .ok_or(RefreshTokenError::Unauthorized)?;
 
-        // Update last_used_at timestamp
+        // Check if token has expired
+        if refresh_token.is_expired() {
+            // Token is expired, delete it and reject
+            let _ = self
+                .refresh_token_repository
+                .delete_token(&req.refresh_token)
+                .await;
+            return Err(RefreshTokenError::Unauthorized);
+        }
+
+        // REUSE DETECTION - Check if token was already used
+        if refresh_token.is_used {
+            // SECURITY BREACH DETECTED"
+            // Someone is trying to use an old token
+            // This means the token was likely stolen
+
+            eprintln!("TOKEN REUSE DETECTED!");
+            eprintln!("Token: {}", &req.refresh_token);
+            eprintln!("User ID: {}", refresh_token.user_id);
+            eprintln!("Originally used at: {:?}", refresh_token.used_at);
+
+            // Nuclear option: Delete ALL user's refresh tokens
+            // Force them to login again
+            self.refresh_token_repository
+                .delete_all_user_tokens(refresh_token.user_id)
+                .await
+                .map_err(|err| RefreshTokenError::Unknown(err.into()))?;
+
+            // Get user info for email
+            let user = self
+                .user_repository
+                .find_by_id(refresh_token.user_id)
+                .await
+                .map_err(|err| RefreshTokenError::Unknown(err.into()))?
+                .ok_or_else(|| {
+                    RefreshTokenError::Unknown(anyhow::anyhow!(
+                        "User with id '{}' is missing,",
+                        refresh_token.user_id
+                    ))
+                })?;
+
+            // Send security alert email
+            if let Err(e) = self
+                .user_notifier
+                .send_security_alert(&user.email, &user.username)
+                .await
+            {
+                eprintln!("Failed to send security alert email: {}", e);
+                // Don't fail the request if email fails
+            }
+
+            return Err(RefreshTokenError::Unauthorized);
+        }
+
+        // Mark the old token as used (consumed)
         self.refresh_token_repository
-            .update_last_used(&req.refresh_token)
+            .mark_token_as_used(&req.refresh_token)
+            .await
+            .map_err(|err| RefreshTokenError::Unknown(err.into()))?;
+
+        // Generate NEW refresh token with rotation
+        let new_refresh_token = generate_refresh_token();
+
+        // Save the new refresh token
+        self.refresh_token_repository
+            .create_token(refresh_token.user_id, &new_refresh_token)
             .await
             .map_err(|err| RefreshTokenError::Unknown(err.into()))?;
 
@@ -253,7 +327,7 @@ impl AuthService for Service {
         let access_token = generate_token(&refresh_token.user_id, &jwt_secret)
             .map_err(|err| RefreshTokenError::Unknown(err.into()))?;
 
-        Ok(access_token)
+        Ok((access_token, new_refresh_token))
     }
 
     async fn forgot_password(

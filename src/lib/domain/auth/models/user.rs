@@ -61,6 +61,7 @@ pub struct LoginUserData {
     #[validate(length(min = 1, message = "Password is required"))]
     pub password: String,
 }
+
 #[derive(Debug, thiserror::Error)]
 pub enum LoginError {
     #[error("that combination of user and password doesn't exist")]
@@ -68,6 +69,13 @@ pub enum LoginError {
     #[error(transparent)]
     Unknown(#[from] anyhow::Error),
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum LogoutError {
+    #[error(transparent)]
+    Unknown(#[from] anyhow::Error),
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum FindUserError {
     #[error(transparent)]

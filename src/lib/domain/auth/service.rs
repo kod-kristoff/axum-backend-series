@@ -140,8 +140,17 @@ impl AuthService for Service {
             .ok_or(LoginError::Unauthorized)?;
 
         // Verify password
-        let password_valid = verify_password(&req.user.password, &user.password_hash)
-            .map_err(|err| LoginError::Unknown(err.into()))?;
+        // move the verifying to another thread to not degrade performance for other tasks
+        let password_valid = tokio::task::spawn_blocking({
+            let password = req.user.password.clone();
+            let password_hash = user.password_hash.clone();
+            move || verify_password(&password, &password_hash)
+        })
+        .await
+        // JoinError
+        .map_err(|err| LoginError::Unknown(err.into()))?
+        // BrcyptError
+        .map_err(|err| LoginError::Unknown(err.into()))?;
 
         if !password_valid {
             return Err(LoginError::Unauthorized);
@@ -218,7 +227,7 @@ impl AuthService for Service {
         let jwt_secret =
             std::env::var("JWT_SECRET").map_err(|err| LoginError::Unknown(err.into()))?;
 
-        let claims = validate_token(&token, &jwt_secret).map_err(|_| LoginError::Unauthorized)?;
+        let claims = validate_token(token, &jwt_secret).map_err(|_| LoginError::Unauthorized)?;
 
         // Get user from database
         let user_id = Uuid::parse_str(&claims.sub).map_err(|_| LoginError::Unauthorized)?;
@@ -368,7 +377,7 @@ impl AuthService for Service {
             .await
             .map_err(|err| {
                 eprintln!("Failed to send password reset email: {}", err);
-                ForgotPasswordError::Unknown(err.into())
+                ForgotPasswordError::Unknown(err)
             })?;
 
         Ok(())
